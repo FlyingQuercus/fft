@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Web Audio API FFT with Peak Hold</title>
+<style>
+  body { background: #111; color: #fff; text-align: center; font-family: sans-serif; }
+  canvas { display: block; margin: 20px auto; background: #000; }
+  .controls { margin: 20px; }
+  input[type="file"], button { margin: 5px; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>Web Audio API FFT Spectrum (Mic or File) with Peak Hold</h1>
+
+<div class="controls">
+  <button id="micBtn">Use Microphone</button>
+  <input type="file" id="fileInput" accept="audio/*,video/*">
+</div>
+
+<canvas id="fftCanvas" width="800" height="300"></canvas>
+
+<script>
+(function() {
+    const canvas = document.getElementById('fftCanvas');
+    const ctx = canvas.getContext('2d');
+    const WIDTH = canvas.width;
+    const HEIGHT = canvas.height;
+
+    let audioCtx;
+    let analyser;
+    let dataArray;
+    let bufferLength;
+    let sourceNode;
+    let animationId;
+
+    // Peak hold arrays
+    let peakValues = [];
+    let peakDecay = 0; // pixels per frame
+
+    function initAnalyser() {
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+        peakValues = new Array(bufferLength).fill(0);
+    }
+
+    function draw() {
+        animationId = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        const barWidth = (WIDTH / bufferLength) * 2.5;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const barHeight = dataArray[i];
+
+            // Update peak hold
+            if (barHeight > peakValues[i]) {
+                peakValues[i] = barHeight; // new peak
+            } else {
+                peakValues[i] = Math.max(0, peakValues[i] - peakDecay); // decay
+            }
+
+            // Draw bar
+            ctx.fillStyle = `rgb(${barHeight + 100}, 50, 50)`;
+            ctx.fillRect(x, HEIGHT - barHeight, barWidth, barHeight);
+
+            // Draw peak marker
+            ctx.fillStyle = '#0ff';
+            ctx.fillRect(x, HEIGHT - peakValues[i] - 2, barWidth, 2);
+
+            x += barWidth + 1;
+        }
+    }
+
+    function stopPreviousSource() {
+        if (animationId) cancelAnimationFrame(animationId);
+        if (sourceNode && sourceNode.mediaElement) {
+            sourceNode.mediaElement.pause();
+            sourceNode.mediaElement.src = '';
+        }
+    }
+
+    document.getElementById('micBtn').addEventListener('click', async () => {
+        try {
+            stopPreviousSource();
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            initAnalyser();
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            sourceNode = audioCtx.createMediaStreamSource(stream);
+            sourceNode.connect(analyser);
+            draw();
+        } catch (err) {
+            console.error('Microphone error:', err);
+            alert('Microphone access denied or unavailable.');
+        }
+    });
+
+    document.getElementById('fileInput').addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        stopPreviousSource();
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        initAnalyser();
+
+        const mediaElement = document.createElement(file.type.startsWith('video') ? 'video' : 'audio');
+        mediaElement.controls = true;
+        mediaElement.src = URL.createObjectURL(file);
+        mediaElement.crossOrigin = "anonymous";
+        mediaElement.loop = true;
+        mediaElement.play();
+
+        document.body.appendChild(mediaElement); // Optional: show player
+        sourceNode = audioCtx.createMediaElementSource(mediaElement);
+        sourceNode.connect(analyser);
+        analyser.connect(audioCtx.destination);
+        draw();
+    });
+})();
+</script>
+</body>
+</html>
